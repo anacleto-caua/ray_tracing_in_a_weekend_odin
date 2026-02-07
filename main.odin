@@ -61,7 +61,7 @@ main :: proc() {
         v : f64 = f64(y)/f64(ROWS)
         for x in 0..<COLS {
             u : f64 = f64(x)/f64(COLS)
-            ray : Ray = {ZERO, linalg.normalize(lower_left_corner + u*RIGHT + v*UP)}
+            ray : Ray = {ZERO, linalg.normalize(lower_left_corner + u*RIGHT*4 + v*UP*2)}
             print_color(file, lerp_2_color_ray_on_y(color_blue, color__white, ray))
         }
         fmt.fprintfln(file, "")
