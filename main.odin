@@ -76,12 +76,29 @@ main :: proc() {
     // Fill header information
     fmt.fprintf(file, "P3\n%d %d\n255\n", COLS, ROWS)
 
-    // Spheres
-    sphere : Sphere =
-    {
-        pos = (FORWARD * 2),
-        radius = 1,
-        color = { 1, 0, 0 }
+    // Spheres - I don't wanna sort from backwards so keep it orded
+    spheres : []Sphere ={
+        {
+            pos = (FORWARD * 7) + (RIGHT * -7) + (UP * -2),
+            radius = 1.7,
+            color = { 1, 0, 0 }
+        },
+        {
+            pos = (FORWARD * 5) + (RIGHT * 5) + (UP * 2),
+            radius = .8,
+            color = { 1, 0, 0 }
+        },
+        {
+            pos = (FORWARD * 4) + (RIGHT * 5) + (UP * -2),
+            radius = 1.3,
+            color = { 1, 0, 0 }
+        },
+        {
+            pos = (FORWARD * 2),
+            radius = 1,
+            color = { 1, 0, 0 }
+        },
+
     }
 
     // Other vars
@@ -97,14 +114,14 @@ main :: proc() {
             eye_ray : Ray = {ZERO, linalg.normalize(lower_left_corner + u*RIGHT*4 + v*UP*2)}
 
             final_color := lerp_2_color_ray_on_y(color_blue, color_white, eye_ray)
-
-            does_hit, hit_t := ray_hit_sphere(eye_ray, sphere)
-            if does_hit {
-                hit_point := ray_point_at(eye_ray, hit_t)
-                normal :=  (.5 * (linalg.normalize(hit_point - sphere.pos) + ONE))
-                final_color = normal
+            for sphere in spheres {
+                does_hit, hit_t := ray_hit_sphere(eye_ray, sphere)
+                if does_hit {
+                    hit_point := ray_point_at(eye_ray, hit_t)
+                    normal :=  (.5 * (linalg.normalize(hit_point - sphere.pos) + ONE))
+                    final_color = normal
+                }
             }
-
             print_color(file, final_color)
         }
         fmt.fprintfln(file, "")
