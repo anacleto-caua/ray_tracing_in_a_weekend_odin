@@ -62,8 +62,8 @@ print_color :: proc(file : os.Handle, color : Color) {
 main :: proc() {
     // Config ppm
     filepath := "./out.ppm"
-    COLS :: 200     // width
-    ROWS :: 100     // height
+    WIDTH :: 200
+    HEIGHT :: 100
 
     // Open file
     file, error := os.open(filepath, os.O_RDWR)
@@ -74,44 +74,53 @@ main :: proc() {
     defer(os.close(file))
 
     // Fill header information
-    fmt.fprintf(file, "P3\n%d %d\n255\n", COLS, ROWS)
+    fmt.fprintf(file, "P3\n%d %d\n255\n", WIDTH, HEIGHT)
 
     // Spheres - I don't wanna sort from backwards so keep it orded
     spheres : []Sphere ={
         {
-            pos = (FORWARD * 7) + (RIGHT * -7) + (UP * -2),
-            radius = 1.7,
+            pos = (FORWARD * 14) + (RIGHT * -14) + (UP * -4),
+            radius = 3.4,
             color = { 1, 0, 0 }
         },
         {
-            pos = (FORWARD * 5) + (RIGHT * 5) + (UP * 2),
-            radius = .8,
+            pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
+            radius = 1.6,
             color = { 1, 0, 0 }
         },
         {
-            pos = (FORWARD * 4) + (RIGHT * 5) + (UP * -2),
-            radius = 1.3,
+            pos = (FORWARD * 8) + (RIGHT * 10) + (UP * -4),
+            radius = 2.6,
             color = { 1, 0, 0 }
         },
         {
-            pos = (FORWARD * 2),
-            radius = 1,
+            pos = (FORWARD * 4),
+            radius = 2,
             color = { 1, 0, 0 }
         },
 
     }
 
-    // Other vars
-    lower_left_corner : Vec3 = { -2, -1, 1 }
+    // Camera
+    aspect_ratio := f64(WIDTH)/f64(HEIGHT)
+    viewport_height := 2.0
+    viewport_width := viewport_height * aspect_ratio
+
+    origin := ZERO
+    horizontal : Vec3 = RIGHT * viewport_width
+    vertical : Vec3 = UP * viewport_height
+    lower_left_corner : Vec3 = origin - (horizontal/2) - (vertical/2) + FORWARD
+
+    // Background
     color_blue : Color = { 0, 0, 1 }
     color_white : Color = { 1, 1, 1 }
 
     // Write image data
-    for y in 0..<ROWS {
-        v : f64 = 1 - (f64(y)/f64(ROWS - 1))
-        for x in 0..<COLS {
-            u : f64 = 1 - (f64(x)/f64(COLS - 1))
-            eye_ray : Ray = {ZERO, linalg.normalize(lower_left_corner + u*RIGHT*4 + v*UP*2)}
+    for y in 0..<HEIGHT {
+        v : f64 = 1 - (f64(y)/f64(HEIGHT - 1))
+        for x in 0..<WIDTH {
+            u : f64 = (f64(x)/f64(WIDTH - 1))
+            eye_ray : Ray = {origin, linalg.normalize(lower_left_corner + u*horizontal + v*vertical)}
 
             final_color := lerp_2_color_ray_on_y(color_blue, color_white, eye_ray)
             for sphere in spheres {
