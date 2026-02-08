@@ -59,8 +59,20 @@ print_color :: proc(file : os.Handle, color : Color) {
     fmt.fprintf(file, "%d %d %d ", u8(norm_scaled_color.x), u8(norm_scaled_color.y), u8(norm_scaled_color.z))
 }
 
+rand_point_in_sphere :: proc (sphere : Sphere) -> Pos3 {
+    rng_y := rand.float64_range(-1, 1)
+    r := linalg.sqrt(1 - linalg.pow(rng_y, 2))
+    long := rand.float64_range(-linalg.PI , linalg.PI)
+    point_on_sphere : Pos3 = { r * linalg.sin(long), rng_y, r * linalg.cos(long) }
+    point_in_sphere : Pos3 = sphere.pos + sphere.radius * point_on_sphere * linalg.pow(rand.float64_range(0, 1), 1/3)
+    return point_in_sphere
+}
+
 // Entry point
 main :: proc() {
+    // Hacky way of scripting tests without leaving the folder
+    // main_test()
+
     // Config ppm
     filepath := "./out.ppm"
     WIDTH :: 200
