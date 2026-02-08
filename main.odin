@@ -3,6 +3,7 @@ package main
 import "core:os"
 import "core:fmt"
 import "core:math"
+import "core:math/rand"
 import "core:math/linalg"
 
 // Types
@@ -114,23 +115,35 @@ main :: proc() {
     // Background
     color_blue : Color = { 0, 0, 1 }
     color_white : Color = { 1, 1, 1 }
+    color_magenta : Color = { 1, 0, 1 }
+
+    // Antialliasing
+    samples_count := 100
 
     // Write image data
     for y in 0..<HEIGHT {
-        v : f64 = 1 - (f64(y)/f64(HEIGHT - 1))
         for x in 0..<WIDTH {
-            u : f64 = (f64(x)/f64(WIDTH - 1))
-            eye_ray : Ray = {origin, linalg.normalize(lower_left_corner + u*horizontal + v*vertical)}
+            // Aa sampling
+            final_color := ZERO;
+            for s in 0..<samples_count {
+                // Ray
+                u : f64 = ((f64(x) + rand.float64()) /f64(WIDTH - 1))
+                v : f64 = 1 - ((f64(y) + rand.float64()) /f64(HEIGHT - 1))
+                eye_ray : Ray = { origin, linalg.normalize(lower_left_corner + u*horizontal + v*vertical) }
 
-            final_color := lerp_2_color_ray_on_y(color_blue, color_white, eye_ray)
-            for sphere in spheres {
-                does_hit, hit_t := ray_hit_sphere(eye_ray, sphere)
-                if does_hit {
-                    hit_point := ray_point_at(eye_ray, hit_t)
-                    normal :=  (.5 * (linalg.normalize(hit_point - sphere.pos) + ONE))
-                    final_color = normal
+                sample_color := lerp_2_color_ray_on_y(color_blue, color_white, eye_ray)
+                for sphere in spheres {
+                    does_hit, hit_t := ray_hit_sphere(eye_ray, sphere)
+                    if does_hit {
+                        hit_point := ray_point_at(eye_ray, hit_t)
+                        normal :=  (.5 * (linalg.normalize(hit_point - sphere.pos) + ONE))
+                        sample_color = normal
+                        break
+                    }
                 }
+                final_color += sample_color
             }
+            final_color /= f64(samples_count)
             print_color(file, final_color)
         }
         fmt.fprintfln(file, "")
