@@ -77,16 +77,11 @@ main :: proc() {
     // Fill header information
     fmt.fprintf(file, "P3\n%d %d\n255\n", WIDTH, HEIGHT)
 
-    // Spheres - I don't wanna sort from backwards so keep it orded
-    spheres : []Sphere ={
+    // Spheres - I don't wanna sort from backwards so keep it sorted - closer to furter in reference to the camera
+    spheres : []Sphere = {
         {
-            pos = (FORWARD * 14) + (RIGHT * -14) + (UP * -4),
-            radius = 3.4,
-            color = { 1, 0, 0 }
-        },
-        {
-            pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
-            radius = 1.6,
+            pos = (FORWARD * 4),
+            radius = 2,
             color = { 1, 0, 0 }
         },
         {
@@ -95,11 +90,15 @@ main :: proc() {
             color = { 1, 0, 0 }
         },
         {
-            pos = (FORWARD * 4),
-            radius = 2,
+            pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
+            radius = 1.6,
             color = { 1, 0, 0 }
         },
-
+        {
+            pos = (FORWARD * 14) + (RIGHT * -7) + (UP * -4),
+            radius = 3.4,
+            color = { 1, 0, 0 }
+        },
     }
 
     // Camera
