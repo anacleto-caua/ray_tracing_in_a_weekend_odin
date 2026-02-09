@@ -53,7 +53,6 @@ HitRecord :: struct {
 Sphere :: struct {
     pos : Pos3,
     radius : f64,
-    color : Color,
     material : Material
 }
 
@@ -92,31 +91,26 @@ spheres : []Sphere = {
     {
         pos = (FORWARD * 4),
         radius = 2,
-        color = { 1, 0, 0 },
         material = default_material_test_,
     },
     {
         pos = (FORWARD * 5) + (UP * -23),
         radius = 20,
-        color = { 1, 0, 0 },
         material = default_material_test_,
     },
     {
         pos = (FORWARD * 8) + (RIGHT * 10) + (UP * -4),
         radius = 2.6,
-        color = { 1, 0, 0 },
         material = default_material_test_,
     },
     {
         pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
         radius = 1.6,
-        color = { 1, 0, 0 },
         material = default_material_test_
     },
     {
         pos = (FORWARD * 14) + (RIGHT * -7) + (UP * -4),
         radius = 3.4,
-        color = { 1, 0, 0 },
         material = default_material_test_,
     },
 }
