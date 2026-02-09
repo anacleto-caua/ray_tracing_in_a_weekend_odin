@@ -28,6 +28,7 @@ LambertianData :: struct {
 
 MetalicData :: struct {
     albedo : Vec3,
+    fuzziness: f64
 }
 
 Material :: struct {
@@ -71,7 +72,8 @@ default_lambertian_data_test_ : LambertianData = {
 }
 
 default_metal_data_test_ : MetalicData = {
-    albedo = { 1, 0, 1 }
+    albedo = { 1, 0, 1 },
+    fuzziness = .1
 }
 
 default_lambertian_material_test_ : Material = {
@@ -149,7 +151,7 @@ scatter_metalic :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray
     normalized_dir := linalg.normalize(ray.dir)
     reflect_dir : Vec3 = normalized_dir - 2 * linalg.dot(normalized_dir, hit.normal) * hit.normal
 
-    scattered : Ray = { hit.pos, reflect_dir }
+    scattered : Ray = { hit.pos, reflect_dir + material.fuzziness * rand_point_in_sphere_any() }
     attenuation : Pos3 = material.albedo
     did_hit : bool = (linalg.dot(scattered.dir, hit.normal) > 0)
     return did_hit, scattered, attenuation
