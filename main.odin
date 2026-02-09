@@ -19,7 +19,7 @@ Ray :: struct {
 MaterialType :: enum {
     Lambertian,
     Metalic,
-    //Dieletric
+    Dielectric
 }
 
 LambertianData :: struct {
@@ -31,6 +31,10 @@ MetalicData :: struct {
     fuzziness: f64
 }
 
+DieletricData :: struct {
+    reflectiviness: f64
+}
+
 Material :: struct {
     type : MaterialType,
     data : rawptr
@@ -40,7 +44,7 @@ ScatterProc :: #type proc (ray : Ray, hit : HitRecord, data : rawptr) -> (bool, 
 ScatterTable := [MaterialType]ScatterProc {
     .Lambertian = scatter_lambertian,
     .Metalic = scatter_metalic,
-    //.Dielectric = scatter_dielectric,
+    .Dielectric = scatter_dielectric,
 }
 
 HitRecord :: struct {
@@ -76,6 +80,11 @@ default_metal_data_test_ : MetalicData = {
     fuzziness = .1
 }
 
+default_dielectric_data_test_ : DieletricData = {
+    // v - air = 1, glass = 1.3 - 1.7, diamond = 2.4
+    reflectiviness = 1.5
+}
+
 default_lambertian_material_test_ : Material = {
     type = .Lambertian,
     data = &default_lambertian_data_test_
@@ -86,24 +95,29 @@ default_metalic_material_test_ : Material = {
     data = &default_metal_data_test_
 }
 
-default_material_test_ := default_metalic_material_test_
+default_dielectric_material_test_ : Material = {
+    type = .Dielectric,
+    data = &default_dielectric_data_test_
+}
+
+default_material_test_ := default_dielectric_material_test_
 
 // Spheres - I don't wanna sort from backwards so keep it sorted - closer to furter in reference to the camera
 spheres : []Sphere = {
     {
         pos = (FORWARD * 4),
         radius = 2,
-        material = default_material_test_,
+        material = default_dielectric_material_test_,
     },
     {
-        pos = (FORWARD * 5) + (UP * -23),
-        radius = 20,
-        material = default_material_test_,
+        pos = (FORWARD * 5) + (UP * -100),
+        radius = 100,
+        material = default_lambertian_material_test_,
     },
     {
-        pos = (FORWARD * 8) + (RIGHT * 10) + (UP * -4),
+        pos = (FORWARD * 8) + (RIGHT * 10) + (UP * 2),
         radius = 2.6,
-        material = default_material_test_,
+        material = default_metalic_material_test_,
     },
     {
         pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
@@ -111,7 +125,7 @@ spheres : []Sphere = {
         material = default_material_test_
     },
     {
-        pos = (FORWARD * 14) + (RIGHT * -7) + (UP * -4),
+        pos = (FORWARD * 14) + (RIGHT * -10) + (UP * 7),
         radius = 3.4,
         material = default_material_test_,
     },
@@ -137,6 +151,22 @@ T_MAX :: math.F64_MAX
 MAX_DEPTH_RAYCASTING :: 50
 
 // Material procedures
+reflect :: proc(ray_dir, normal : Vec3) -> Vec3 {
+    n_ray_dir := linalg.normalize(ray_dir)
+    return n_ray_dir - 2 * linalg.dot(n_ray_dir, normal) * normal
+}
+
+refract :: proc(ray_dir, normal : Vec3, ni_over_nt : f64) -> (bool, Vec3) {
+    uv := linalg.normalize(ray_dir)
+    dt : f64 = linalg.dot(uv, normal)
+    discriminant := 1.0 - ni_over_nt*ni_over_nt *(1-dt*dt)
+    if discriminant > 0 {
+        refracted := ni_over_nt * (uv - normal * dt) - normal * math.sqrt(discriminant)
+        return true, refracted
+    }
+    return false, ZERO
+}
+
 scatter_lambertian :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color) {
     material := (^LambertianData)(data)
     target : Vec3 = hit.pos + hit.normal + rand_point_in_sphere_any()
@@ -148,13 +178,40 @@ scatter_lambertian :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, 
 scatter_metalic :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color) {
     material := (^MetalicData)(data)
 
-    normalized_dir := linalg.normalize(ray.dir)
-    reflect_dir : Vec3 = normalized_dir - 2 * linalg.dot(normalized_dir, hit.normal) * hit.normal
+    reflect_dir : Vec3 = reflect(ray.dir, hit.normal)
 
     scattered : Ray = { hit.pos, reflect_dir + material.fuzziness * rand_point_in_sphere_any() }
     attenuation : Pos3 = material.albedo
     did_hit : bool = (linalg.dot(scattered.dir, hit.normal) > 0)
     return did_hit, scattered, attenuation
+}
+
+scatter_dielectric :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color) {
+    material := (^DieletricData)(data)
+
+    outward_normal : Vec3
+    ni_over_nt : f64
+    attenuation : Vec3 = ONE
+    scattered : Ray
+
+    if linalg.dot(ray.dir, hit.normal) > 0 {
+        outward_normal = - hit.normal
+        ni_over_nt = material.reflectiviness
+    } else {
+        outward_normal = hit.normal
+        ni_over_nt = 1.0 / material.reflectiviness
+    }
+
+    did_refract, refraction := refract(ray.dir, outward_normal, ni_over_nt)
+    if did_refract {
+        scattered = { hit.pos, refraction }
+        return true, scattered, attenuation
+    }
+
+    reflected : Vec3 = reflect(ray.dir, hit.normal)
+
+    scattered = { hit.pos, reflected }
+    return false, scattered, attenuation
 }
 
 // Procedures
@@ -253,7 +310,7 @@ color :: proc(ray : Ray, depth : u32) -> Color {
         if should_scatter && depth < MAX_DEPTH_RAYCASTING {
             return attenuation*color(scattered, depth + 1)* .5
         } else {
-            return { 0, 0, 0 }
+            return ZERO
         }
     }
     return lerp_2_color_ray_on_y(color_blue, color_white, ray)
@@ -261,9 +318,6 @@ color :: proc(ray : Ray, depth : u32) -> Color {
 
 // Entry point
 main :: proc() {
-    // Hacky way of scripting tests without leaving the folder
-    // main_test()
-
     // Config ppm
     filepath := "./out.ppm"
     WIDTH :: 200
