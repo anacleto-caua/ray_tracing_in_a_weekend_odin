@@ -323,7 +323,7 @@ color :: proc(ray : Ray, depth : u32) -> Color {
     if record.does_hit {
         should_scatter, scattered, attenuation := ScatterTable[record.hitted.material.type](ray, record, record.hitted.material.data)
         if should_scatter && depth < MAX_DEPTH_RAYCASTING {
-            return attenuation*color(scattered, depth + 1)* .5
+            return attenuation*color(scattered, depth + 1)
         } else {
             return ZERO
         }
