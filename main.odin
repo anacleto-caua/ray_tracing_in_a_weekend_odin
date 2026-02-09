@@ -66,10 +66,14 @@ color_magenta : Color = { 1, 0, 1 }
 
 color_top : Color = { 1, 1, 1 }
 color_bottom : Color = { 0, 0, 1 }
-surface_reflection : f64 = .5
+SURFACE_REFLECTION : f64 = .4
 
 // Antialliasing
 samples_count := 100
+
+// T Cap
+T_MIN :: 0.001
+T_MAX :: math.F64_MAX
 
 // Procedures
 ray_point_at :: proc(ray : Ray, t : f64) -> Pos3 {
@@ -101,6 +105,11 @@ ray_hit_sphere :: proc(ray : Ray, sphere : Sphere) -> (bool, f64) {
         }
     }
 
+    // Cap t
+    if root < T_MIN || root > T_MAX {
+        return false, -1
+    }
+
     return true, root
 }
 
@@ -111,7 +120,7 @@ lerp_2_color_ray_on_y :: proc(color1, color2 : Color, ray : Ray) -> Color {
 }
 
 print_color :: proc(file : os.Handle, color : Color) {
-    norm_scaled_color := color * f64(255.99)
+    norm_scaled_color := linalg.sqrt(color) * f64(255.99)
     fmt.fprintf(file, "%d %d %d ", u8(norm_scaled_color.x), u8(norm_scaled_color.y), u8(norm_scaled_color.z))
 }
 
@@ -132,7 +141,7 @@ color :: proc(ray : Ray) -> Color {
             normal : Vec3 = (.5 * (linalg.normalize(hit_point - sphere.pos) + ONE))
             new_ray_target := normal + rand_point_in_sphere(sphere)
             new_ray : Ray = { hit_point, new_ray_target }
-            return surface_reflection * color(new_ray)
+            return SURFACE_REFLECTION * color(new_ray)
         }
     }
     return lerp_2_color_ray_on_y(color_blue, color_white, ray)
