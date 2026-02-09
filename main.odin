@@ -18,11 +18,15 @@ Ray :: struct {
 
 MaterialType :: enum {
     Lambertian,
-    //Metal,
+    Metalic,
     //Dieletric
 }
 
 LambertianData :: struct {
+    albedo : Vec3,
+}
+
+MetalicData :: struct {
     albedo : Vec3,
 }
 
@@ -34,15 +38,16 @@ Material :: struct {
 ScatterProc :: #type proc (ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color)
 ScatterTable := [MaterialType]ScatterProc {
     .Lambertian = scatter_lambertian,
-    //.Metal      = scatter_metal,
+    .Metalic = scatter_metalic,
     //.Dielectric = scatter_dielectric,
 }
 
 HitRecord :: struct {
+    hitted : Sphere,
     pos : Pos3,
     normal : Vec3,
     root : f64,
-    hit : bool,
+    does_hit : bool,
 }
 
 Sphere :: struct {
@@ -60,14 +65,27 @@ UP : Vec3 =  { 0, 1, 0 }
 ZERO : Vec3 =  { 0, 0, 0 }
 ONE : Vec3 =  { 1, 1, 1 }
 
+CAMERA_POS := ZERO
+
 default_lambertian_data_test_ : LambertianData = {
     albedo = { 1, 0, 1 }
 }
 
-default_material_test_ : Material = {
+default_metal_data_test_ : MetalicData = {
+    albedo = { 1, 0, 1 }
+}
+
+default_lambertian_material_test_ : Material = {
     type = .Lambertian,
     data = &default_lambertian_data_test_
 }
+
+default_metalic_material_test_ : Material = {
+    type = .Metalic,
+    data = &default_metal_data_test_
+}
+
+default_material_test_ := default_metalic_material_test_
 
 // Spheres - I don't wanna sort from backwards so keep it sorted - closer to furter in reference to the camera
 spheres : []Sphere = {
@@ -119,8 +137,11 @@ samples_count := 100
 T_MIN :: 0.001
 T_MAX :: math.F64_MAX
 
-//Procedures
-scatter_lambertian :: proc (ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color) {
+// Raycast cap
+MAX_DEPTH_RAYCASTING :: 50
+
+// Material procedures
+scatter_lambertian :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color) {
     material := (^LambertianData)(data)
     target : Vec3 = hit.pos + hit.normal + rand_point_in_sphere_any()
     scattered : Ray = { hit.pos, target - hit.pos }
@@ -128,6 +149,19 @@ scatter_lambertian :: proc (ray : Ray, hit : HitRecord, data : rawptr) -> (bool,
     return true, scattered, attenuation
 }
 
+scatter_metalic :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color) {
+    material := (^MetalicData)(data)
+
+    normalized_dir := linalg.normalize(ray.dir)
+    reflect_dir : Vec3 = normalized_dir - 2 * linalg.dot(normalized_dir, hit.normal) * hit.normal
+
+    scattered : Ray = { hit.pos, reflect_dir }
+    attenuation : Pos3 = material.albedo
+    did_hit : bool = (linalg.dot(scattered.dir, hit.normal) > 0)
+    return did_hit, scattered, attenuation
+}
+
+// Procedures
 ray_point_at :: proc(ray : Ray, t : f64) -> Pos3 {
     return ray.pos + ray.dir * t
 }
@@ -165,6 +199,28 @@ ray_hit_sphere :: proc(ray : Ray, sphere : Sphere) -> (bool, f64) {
     return true, root
 }
 
+ray_hit_world :: proc (ray : Ray) -> HitRecord {
+    record : HitRecord = { does_hit = false }
+    best_dist := math.F64_MAX
+    for sphere in spheres {
+        does_hit, hit_t := ray_hit_sphere(ray, sphere)
+        if does_hit {
+            dist := linalg.distance(CAMERA_POS, sphere.pos)
+            if dist < best_dist {
+                best_dist = dist
+                record = {
+                    hitted = sphere,
+                    pos = ray_point_at(ray, hit_t),
+                    root = hit_t,
+                    does_hit = true
+                }
+                record.normal = linalg.normalize(record.pos - sphere.pos)
+            }
+        }
+    }
+    return record
+}
+
 lerp_2_color_ray_on_y :: proc(color1, color2 : Color, ray : Ray) -> Color {
     unit_vector := linalg.normalize(ray.dir)
     t := 0.5 * (unit_vector.y + 1.0)
@@ -194,23 +250,14 @@ rand_point_in_sphere_any :: proc() -> Pos3 {
     return linalg.normalize(point_in_sphere)
 }
 
-color :: proc(ray : Ray) -> Color {
-    for sphere in spheres {
-        does_hit, hit_t := ray_hit_sphere(ray, sphere)
-        if does_hit {
-            record : HitRecord = {
-                pos = ray_point_at(ray, hit_t),
-                root = hit_t,
-                hit = does_hit
-            }
-            record.normal = (.5 * (linalg.normalize(record.pos - sphere.pos) + ONE))
-
-            should_scatter, scattered, attenuation := ScatterTable[sphere.material.type](ray, record, sphere.material.data)
-            if should_scatter {
-                new_ray_target := record.normal + rand_point_in_sphere(sphere)
-                new_ray : Ray = { record.pos, new_ray_target }
-                return color(scattered) * attenuation * SURFACE_REFLECTION
-            }
+color :: proc(ray : Ray, depth : u32) -> Color {
+    record : HitRecord = ray_hit_world(ray)
+    if record.does_hit {
+        should_scatter, scattered, attenuation := ScatterTable[record.hitted.material.type](ray, record, record.hitted.material.data)
+        if should_scatter && depth < MAX_DEPTH_RAYCASTING {
+            return attenuation*color(scattered, depth + 1)* .5
+        } else {
+            return { 0, 0, 0 }
         }
     }
     return lerp_2_color_ray_on_y(color_blue, color_white, ray)
@@ -242,7 +289,7 @@ main :: proc() {
     viewport_height := 2.0
     viewport_width := viewport_height * aspect_ratio
 
-    origin := ZERO
+    origin := CAMERA_POS
     horizontal : Vec3 = RIGHT * viewport_width
     vertical : Vec3 = UP * viewport_height
     lower_left_corner : Vec3 = origin - (horizontal/2) - (vertical/2) + FORWARD
@@ -258,7 +305,7 @@ main :: proc() {
                 v : f64 = 1 - ((f64(y) + rand.float64()) /f64(HEIGHT - 1))
 
                 eye_ray : Ray = { origin, linalg.normalize(lower_left_corner + u*horizontal + v*vertical) }
-                sample_color := color(eye_ray)
+                sample_color := color(eye_ray, 0)
 
                 final_color += sample_color
             }
