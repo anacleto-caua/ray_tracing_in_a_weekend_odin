@@ -16,10 +16,40 @@ Ray :: struct {
     dir : Vec3
 }
 
+MaterialType :: enum {
+    Lambertian,
+    //Metal,
+    //Dieletric
+}
+
+LambertianData :: struct {
+    albedo : Vec3,
+}
+
+Material :: struct {
+    type : MaterialType,
+    data : rawptr
+}
+
+ScatterProc :: #type proc (ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color)
+ScatterTable := [MaterialType]ScatterProc {
+    .Lambertian = scatter_lambertian,
+    //.Metal      = scatter_metal,
+    //.Dielectric = scatter_dielectric,
+}
+
+HitRecord :: struct {
+    pos : Pos3,
+    normal : Vec3,
+    root : f64,
+    hit : bool,
+}
+
 Sphere :: struct {
     pos : Pos3,
     radius : f64,
-    color : Color
+    color : Color,
+    material : Material
 }
 
 // Defaults
@@ -30,32 +60,46 @@ UP : Vec3 =  { 0, 1, 0 }
 ZERO : Vec3 =  { 0, 0, 0 }
 ONE : Vec3 =  { 1, 1, 1 }
 
+default_lambertian_data_test_ : LambertianData = {
+    albedo = { 1, 0, 1 }
+}
+
+default_material_test_ : Material = {
+    type = .Lambertian,
+    data = &default_lambertian_data_test_
+}
+
 // Spheres - I don't wanna sort from backwards so keep it sorted - closer to furter in reference to the camera
 spheres : []Sphere = {
     {
         pos = (FORWARD * 4),
         radius = 2,
-        color = { 1, 0, 0 }
+        color = { 1, 0, 0 },
+        material = default_material_test_,
     },
     {
         pos = (FORWARD * 5) + (UP * -23),
         radius = 20,
-        color = { 1, 0, 0 }
+        color = { 1, 0, 0 },
+        material = default_material_test_,
     },
     {
         pos = (FORWARD * 8) + (RIGHT * 10) + (UP * -4),
         radius = 2.6,
-        color = { 1, 0, 0 }
+        color = { 1, 0, 0 },
+        material = default_material_test_,
     },
     {
         pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
         radius = 1.6,
-        color = { 1, 0, 0 }
+        color = { 1, 0, 0 },
+        material = default_material_test_
     },
     {
         pos = (FORWARD * 14) + (RIGHT * -7) + (UP * -4),
         radius = 3.4,
-        color = { 1, 0, 0 }
+        color = { 1, 0, 0 },
+        material = default_material_test_,
     },
 }
 
@@ -75,7 +119,15 @@ samples_count := 100
 T_MIN :: 0.001
 T_MAX :: math.F64_MAX
 
-// Procedures
+//Procedures
+scatter_lambertian :: proc (ray : Ray, hit : HitRecord, data : rawptr) -> (bool, Ray, Color) {
+    material := (^LambertianData)(data)
+    target : Vec3 = hit.pos + hit.normal + rand_point_in_sphere_any()
+    scattered : Ray = { hit.pos, target - hit.pos }
+    attenuation : Pos3 = material.albedo
+    return true, scattered, attenuation
+}
+
 ray_point_at :: proc(ray : Ray, t : f64) -> Pos3 {
     return ray.pos + ray.dir * t
 }
@@ -133,15 +185,32 @@ rand_point_in_sphere :: proc(sphere : Sphere) -> Pos3 {
     return point_on_sphere
 }
 
+rand_point_in_sphere_any :: proc() -> Pos3 {
+    rng_y := rand.float64_range(-1, 1)
+    r := math.sqrt(1 - linalg.pow(rng_y, 2))
+    long := rand.float64_range(-linalg.PI , linalg.PI)
+    point_on_sphere : Pos3 = { r * linalg.sin(long), rng_y, r * linalg.cos(long) }
+    point_in_sphere : Pos3 = point_on_sphere * linalg.pow(rand.float64_range(0, 1), 1/3)
+    return linalg.normalize(point_in_sphere)
+}
+
 color :: proc(ray : Ray) -> Color {
     for sphere in spheres {
         does_hit, hit_t := ray_hit_sphere(ray, sphere)
         if does_hit {
-            hit_point : Pos3 = ray_point_at(ray, hit_t)
-            normal : Vec3 = (.5 * (linalg.normalize(hit_point - sphere.pos) + ONE))
-            new_ray_target := normal + rand_point_in_sphere(sphere)
-            new_ray : Ray = { hit_point, new_ray_target }
-            return SURFACE_REFLECTION * color(new_ray)
+            record : HitRecord = {
+                pos = ray_point_at(ray, hit_t),
+                root = hit_t,
+                hit = does_hit
+            }
+            record.normal = (.5 * (linalg.normalize(record.pos - sphere.pos) + ONE))
+
+            should_scatter, scattered, attenuation := ScatterTable[sphere.material.type](ray, record, sphere.material.data)
+            if should_scatter {
+                new_ray_target := record.normal + rand_point_in_sphere(sphere)
+                new_ray : Ray = { record.pos, new_ray_target }
+                return color(scattered) * attenuation * SURFACE_REFLECTION
+            }
         }
     }
     return lerp_2_color_ray_on_y(color_blue, color_white, ray)

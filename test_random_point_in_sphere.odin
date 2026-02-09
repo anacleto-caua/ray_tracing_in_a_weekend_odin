@@ -5,6 +5,15 @@ import "vendor:raylib"
 import "core:math/rand"
 import "core:math/linalg"
 
+mock_lambertian_data_ : LambertianData = {
+    albedo = { 1, 1, 1 }
+}
+
+mock_material_ : Material = {
+    type = .Lambertian,
+    data = &mock_lambertian_data_
+}
+
 draw_sphere_on_raylib :: proc (sphere : Sphere, wiremode : bool = false) {
     color_cast := linalg.array_cast((sphere.color * 255.99), u8)
     ray_color_cast: raylib.Color = {color_cast.x, color_cast.y, color_cast.z , 255 }
@@ -20,7 +29,7 @@ draw_sphere_on_raylib :: proc (sphere : Sphere, wiremode : bool = false) {
 
 draw_point :: proc(pos : Pos3) {
     mock_sphere : Sphere = {
-        pos, .07, {1, 0, 1}
+            pos, .07, {1, 0, 1}, mock_material_
     }
 
     draw_sphere_on_raylib(mock_sphere)
