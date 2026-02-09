@@ -151,6 +151,12 @@ T_MAX :: math.F64_MAX
 MAX_DEPTH_RAYCASTING :: 50
 
 // Material procedures
+schlick_aprox :: proc(cos, ref : f64) -> f64 {
+    r0 := (1-ref)/(1+ref)
+    r0 = r0*r0
+    return r0 + (1-r0)* math.pow(1-cos, 5)
+}
+
 reflect :: proc(ray_dir, normal : Vec3) -> Vec3 {
     n_ray_dir := linalg.normalize(ray_dir)
     return n_ray_dir - 2 * linalg.dot(n_ray_dir, normal) * normal
@@ -193,25 +199,34 @@ scatter_dielectric :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, 
     ni_over_nt : f64
     attenuation : Vec3 = ONE
     scattered : Ray
+    reflected : Vec3 = reflect(ray.dir, hit.normal)
+
+    cos, reflect_prob : f64
 
     if linalg.dot(ray.dir, hit.normal) > 0 {
         outward_normal = - hit.normal
         ni_over_nt = material.reflectiviness
+        cos = material.reflectiviness * linalg.dot(ray.dir, hit.normal) / linalg.length(ray.dir)
     } else {
         outward_normal = hit.normal
         ni_over_nt = 1.0 / material.reflectiviness
+        cos = - linalg.dot(ray.dir, hit.normal) / linalg.length(ray.dir)
     }
 
-    did_refract, refraction := refract(ray.dir, outward_normal, ni_over_nt)
+    did_refract, refracted := refract(ray.dir, outward_normal, ni_over_nt)
     if did_refract {
-        scattered = { hit.pos, refraction }
-        return true, scattered, attenuation
+        reflect_prob = schlick_aprox(cos, material.reflectiviness)
+    } else {
+        scattered = { hit.pos, reflected }
+        reflect_prob = 1.0
     }
 
-    reflected : Vec3 = reflect(ray.dir, hit.normal)
-
-    scattered = { hit.pos, reflected }
-    return false, scattered, attenuation
+    if rand.float64_range(0, 1) < reflect_prob {
+        scattered = { hit.pos, reflected }
+    } else {
+        scattered = { hit.pos, refracted }
+    }
+    return true, scattered, attenuation
 }
 
 // Procedures
