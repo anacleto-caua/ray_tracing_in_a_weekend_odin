@@ -177,7 +177,7 @@ scatter_lambertian :: proc(ray : Ray, hit : HitRecord, data : rawptr) -> (bool, 
     material := (^LambertianData)(data)
     target : Vec3 = hit.pos + hit.normal + rand_point_in_sphere_any()
     scattered : Ray = { hit.pos, target - hit.pos }
-    attenuation : Pos3 = material.albedo
+    attenuation : Vec3 = material.albedo
     return true, scattered, attenuation
 }
 
@@ -269,21 +269,18 @@ ray_hit_sphere :: proc(ray : Ray, sphere : Sphere) -> (bool, f64) {
 
 ray_hit_world :: proc (ray : Ray) -> HitRecord {
     record : HitRecord = { does_hit = false }
-    best_dist := math.F64_MAX
+    closest_hit := math.F64_MAX
     for sphere in spheres {
         does_hit, hit_t := ray_hit_sphere(ray, sphere)
-        if does_hit {
-            dist := linalg.distance(CAMERA_POS, sphere.pos)
-            if dist < best_dist {
-                best_dist = dist
-                record = {
-                    hitted = sphere,
-                    pos = ray_point_at(ray, hit_t),
-                    root = hit_t,
-                    does_hit = true
-                }
-                record.normal = linalg.normalize(record.pos - sphere.pos)
+        if does_hit && hit_t < closest_hit {
+            closest_hit = hit_t
+            record = {
+                hitted = sphere,
+                pos = ray_point_at(ray, hit_t),
+                root = hit_t,
+                does_hit = true
             }
+            record.normal = linalg.normalize(record.pos - sphere.pos)
         }
     }
     return record
