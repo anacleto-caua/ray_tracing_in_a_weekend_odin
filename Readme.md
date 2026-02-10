@@ -8,7 +8,7 @@
 
 # My best render yet
 #### the parameters deserve some tunning :)
-![My peak design]("peak.ppm")
+![My peak design](peak.ppm)
 
 
 
