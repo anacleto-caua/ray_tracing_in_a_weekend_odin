@@ -1,5 +1,6 @@
 package main
 
+import "core:thread"
 import "core:os"
 import "core:fmt"
 import "core:math"
@@ -61,6 +62,18 @@ Sphere :: struct {
     material : Material
 }
 
+CameraInfo :: struct {
+    lwlfcr : Vec3,
+    horizontal : Vec3,
+    vertical : Vec3,
+}
+
+ThreadData :: struct {
+    begin_idx : u64,
+    end_idx : u64,
+    data : []Color
+}
+
 // Defaults
 FORWARD : Vec3 = { 0, 0, 1 }
 RIGHT : Vec3 = { 1, 0, 0 }
@@ -100,7 +113,7 @@ default_dielectric_material_test_ : Material = {
     data = &default_dielectric_data_test_
 }
 
-default_material_test_ := default_dielectric_material_test_
+default_material_test_ := default_lambertian_material_test_
 
 // Spheres - I don't wanna sort from backwards so keep it sorted - closer to furter in reference to the camera
 spheres : []Sphere = {
@@ -112,12 +125,12 @@ spheres : []Sphere = {
     {
         pos = (FORWARD * 5) + (UP * -100),
         radius = 100,
-        material = default_lambertian_material_test_,
+        material = default_dielectric_material_test_,
     },
     {
         pos = (FORWARD * 8) + (RIGHT * 10) + (UP * 2),
         radius = 2.6,
-        material = default_metalic_material_test_,
+        material = default_dielectric_material_test_,
     },
     {
         pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
@@ -127,7 +140,7 @@ spheres : []Sphere = {
     {
         pos = (FORWARD * 14) + (RIGHT * -10) + (UP * 7),
         radius = 3.4,
-        material = default_material_test_,
+        material = default_metalic_material_test_,
     },
 }
 
@@ -140,15 +153,34 @@ color_top : Color = { 1, 1, 1 }
 color_bottom : Color = { 0, 0, 1 }
 SURFACE_REFLECTION : f64 = .4
 
-// Antialliasing
-samples_count := 100
-
 // T Cap
 T_MIN :: 0.001
 T_MAX :: math.F64_MAX
 
-// Raycast cap
-MAX_DEPTH_RAYCASTING :: 50
+// Image quality
+WIDTH :: 2560
+HEIGHT :: 1440
+//WIDTH :: 200
+//HEIGHT :: 100
+PIXEL_COUNT :: WIDTH * HEIGHT
+
+FILE_BUFFER : [HEIGHT*WIDTH]Color
+
+SAMPLES_COUNT := 1000
+MAX_DEPTH_RAYCASTING :: 100
+
+// Camera
+aspect_ratio := f64(WIDTH)/f64(HEIGHT)
+viewport_height := 2.0
+viewport_width := viewport_height * aspect_ratio
+
+origin := CAMERA_POS
+horizontal : Vec3 = RIGHT * viewport_width
+vertical : Vec3 = UP * viewport_height
+lower_left_corner : Vec3 = origin - (horizontal/2) - (vertical/2) + FORWARD
+
+// Config ppm
+FILEPATH := "./out.ppm"
 
 // Material procedures
 schlick_aprox :: proc(cos, ref : f64) -> f64 {
@@ -328,15 +360,85 @@ color :: proc(ray : Ray, depth : u32) -> Color {
     return lerp_2_color_ray_on_y(color_blue, color_white, ray)
 }
 
+cast_rays_per_thread :: proc(t: ^thread.Thread) {
+    thread_data := (^ThreadData)(t.data)
+
+    for local_y in thread_data.begin_idx..<thread_data.end_idx {
+        for x in 0..<WIDTH {
+            // Aa sampling
+            final_color := ZERO;
+            for s in 0..<SAMPLES_COUNT {
+                // Ray
+                u : f64 = ((f64(x) + rand.float64()) /f64(WIDTH - 1))
+                v : f64 = 1 - ((f64(local_y) + rand.float64()) /f64(HEIGHT - 1))
+
+                eye_ray : Ray = { origin, linalg.normalize(lower_left_corner + u*horizontal + v*vertical) }
+                sample_color := color(eye_ray, 0)
+
+                final_color += sample_color
+            }
+            final_color /= f64(SAMPLES_COUNT)
+
+            pixel_index := ((local_y - thread_data.begin_idx) * WIDTH) + u64(x)
+
+            thread_data.data[pixel_index] = final_color
+        }
+    }
+}
+
 // Entry point
 main :: proc() {
-    // Config ppm
-    filepath := "./out.ppm"
-    WIDTH :: 200
-    HEIGHT :: 100
+    fmt.println(" --- Begining process!")
+    fmt.println("Quality params:")
+    fmt.println("Image - [ Width: {} - Height: {} ]", WIDTH, HEIGHT)
+    fmt.println("Ray - [ Ray max depth: {} ]", MAX_DEPTH_RAYCASTING)
+    fmt.println("Multsampling - [ Sample count(per pixel): {} ]", SAMPLES_COUNT)
 
+    fmt.println(" --- Create threads.")
+    THREAD_COUNT :: 16
+    threads_data : [THREAD_COUNT]ThreadData
+    // Break down tasks
+    task_size : u64 = HEIGHT / THREAD_COUNT
+    for t in 0..<THREAD_COUNT {
+        start_y := u64(t) * task_size
+        end_y   := start_y + task_size
+
+        // Handle the remainder rows for the last thread
+        if t == THREAD_COUNT - 1 {
+            end_y = HEIGHT
+        }
+
+        // Calculate the slice range
+        start_index := start_y * WIDTH
+        end_index := end_y * WIDTH
+
+        threads_data[t] = {
+            begin_idx = start_y,
+            end_idx = end_y,
+            data = FILE_BUFFER[start_index:end_index]
+        }
+    }
+
+    // Create threads
+    threads : [THREAD_COUNT]^thread.Thread
+
+    fmt.println(" --- Dispatching threads.")
+    // Dispatch threads
+    for i in 0..<THREAD_COUNT {
+        threads[i] = thread.create(cast_rays_per_thread)
+        threads[i].data = &threads_data[i]
+        thread.start(threads[i])
+    }
+
+    // Wait for all threads
+    for t in threads {
+        thread.join(t)
+        thread.destroy(t)
+    }
+
+    fmt.println(" --- Writing to file.")
     // Open file
-    file, error := os.open(filepath, os.O_WRONLY | os.O_CREATE)
+    file, error := os.open(FILEPATH, os.O_WRONLY | os.O_CREATE)
     if error != nil {
         fmt.eprintln("Error: ", error)
         return;
@@ -346,33 +448,11 @@ main :: proc() {
     // Fill header information
     fmt.fprintf(file, "P3\n%d %d\n255\n", WIDTH, HEIGHT)
 
-    // Camera
-    aspect_ratio := f64(WIDTH)/f64(HEIGHT)
-    viewport_height := 2.0
-    viewport_width := viewport_height * aspect_ratio
-
-    origin := CAMERA_POS
-    horizontal : Vec3 = RIGHT * viewport_width
-    vertical : Vec3 = UP * viewport_height
-    lower_left_corner : Vec3 = origin - (horizontal/2) - (vertical/2) + FORWARD
-
     // Write image data
     for y in 0..<HEIGHT {
         for x in 0..<WIDTH {
-            // Aa sampling
-            final_color := ZERO;
-            for s in 0..<samples_count {
-                // Ray
-                u : f64 = ((f64(x) + rand.float64()) /f64(WIDTH - 1))
-                v : f64 = 1 - ((f64(y) + rand.float64()) /f64(HEIGHT - 1))
-
-                eye_ray : Ray = { origin, linalg.normalize(lower_left_corner + u*horizontal + v*vertical) }
-                sample_color := color(eye_ray, 0)
-
-                final_color += sample_color
-            }
-            final_color /= f64(samples_count)
-            print_color(file, final_color)
+            idx := y*WIDTH + x
+            print_color(file, FILE_BUFFER[idx])
         }
         fmt.fprintfln(file, "")
     }
