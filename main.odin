@@ -1,11 +1,15 @@
 package main
 
+import "core:image"
+import "core:strings"
 import "core:thread"
 import "core:os"
 import "core:fmt"
 import "core:math"
 import "core:math/rand"
 import "core:math/linalg"
+import "core:image/netpbm"
+import stb_image "vendor:stb/image"
 
 // Types
 Vec3 :: linalg.Vector3f64
@@ -383,6 +387,34 @@ cast_rays_per_thread :: proc(t: ^thread.Thread) {
 
             thread_data.data[pixel_index] = final_color
         }
+    }
+}
+
+ppm_to_png :: proc(ppm_filepath, png_filepath : string) {
+    // Load the PPM file
+    ppm_img, error := netpbm.load_from_file(ppm_filepath)
+    if error != nil {
+        fmt.eprintln("Error loading PPM:", error)
+        return
+    }
+    defer image.destroy(ppm_img)
+
+    c_str := strings.clone_to_cstring(png_filepath, context.temp_allocator)
+
+    // Save as png
+    success := stb_image.write_png(
+        c_str,
+        i32(ppm_img.width),
+        i32(ppm_img.height),
+        i32(ppm_img.channels),
+        raw_data(ppm_img.pixels.buf),
+        i32(ppm_img.width * ppm_img.channels),
+    )
+
+    if success == 0 {
+        fmt.eprintln("Failed to save PNG")
+    } else {
+        fmt.println("Successfully converted PPM to PNG!")
     }
 }
 
