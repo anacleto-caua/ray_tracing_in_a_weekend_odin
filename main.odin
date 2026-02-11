@@ -1,11 +1,12 @@
 package main
 
-import "core:image"
-import "core:strings"
-import "core:thread"
+import "core:sys/wasm/wasi"
 import "core:os"
 import "core:fmt"
 import "core:math"
+import "core:image"
+import "core:thread"
+import "core:strings"
 import "core:math/rand"
 import "core:math/linalg"
 import "core:image/netpbm"
@@ -52,6 +53,13 @@ ScatterTable := [MaterialType]ScatterProc {
     .Dielectric = scatter_dielectric,
 }
 
+GenRandomMaterial :: #type proc () -> (rawptr)
+GenRandomMaterialTable := [MaterialType]GenRandomMaterial {
+    .Lambertian = random_lambertian,
+    .Metalic = random_metalic,
+    .Dielectric = random_dielectric,
+}
+
 HitRecord :: struct {
     hitted : Sphere,
     pos : Pos3,
@@ -64,12 +72,6 @@ Sphere :: struct {
     pos : Pos3,
     radius : f64,
     material : Material
-}
-
-CameraInfo :: struct {
-    lwlfcr : Vec3,
-    horizontal : Vec3,
-    vertical : Vec3,
 }
 
 ThreadData :: struct {
@@ -86,68 +88,6 @@ UP : Vec3 =  { 0, 1, 0 }
 ZERO : Vec3 =  { 0, 0, 0 }
 ONE : Vec3 =  { 1, 1, 1 }
 
-CAMERA_POS := ZERO
-
-default_lambertian_data_test_ : LambertianData = {
-    albedo = { 1, 0, 1 }
-}
-
-default_metal_data_test_ : MetalicData = {
-    albedo = { 1, 0, 1 },
-    fuzziness = .1
-}
-
-default_dielectric_data_test_ : DieletricData = {
-    // v - air = 1, glass = 1.3 - 1.7, diamond = 2.4
-    reflectiviness = 1.5
-}
-
-default_lambertian_material_test_ : Material = {
-    type = .Lambertian,
-    data = &default_lambertian_data_test_
-}
-
-default_metalic_material_test_ : Material = {
-    type = .Metalic,
-    data = &default_metal_data_test_
-}
-
-default_dielectric_material_test_ : Material = {
-    type = .Dielectric,
-    data = &default_dielectric_data_test_
-}
-
-default_material_test_ := default_lambertian_material_test_
-
-// Spheres - I don't wanna sort from backwards so keep it sorted - closer to furter in reference to the camera
-spheres : []Sphere = {
-    {
-        pos = (FORWARD * 4),
-        radius = 2,
-        material = default_dielectric_material_test_,
-    },
-    {
-        pos = (FORWARD * 5) + (UP * -100),
-        radius = 100,
-        material = default_dielectric_material_test_,
-    },
-    {
-        pos = (FORWARD * 8) + (RIGHT * 10) + (UP * 2),
-        radius = 2.6,
-        material = default_dielectric_material_test_,
-    },
-    {
-        pos = (FORWARD * 10) + (RIGHT * 10) + (UP * 4),
-        radius = 1.6,
-        material = default_material_test_
-    },
-    {
-        pos = (FORWARD * 14) + (RIGHT * -10) + (UP * 7),
-        radius = 3.4,
-        material = default_metalic_material_test_,
-    },
-}
-
 // Background
 color_blue : Color = { 0, 0, 1 }
 color_white : Color = { 1, 1, 1 }
@@ -162,29 +102,86 @@ T_MIN :: 0.001
 T_MAX :: math.F64_MAX
 
 // Image quality
-WIDTH :: 2560
-HEIGHT :: 1440
-//WIDTH :: 200
-//HEIGHT :: 100
+//WIDTH :: 2560
+//HEIGHT :: 1440
+WIDTH :: 200
+HEIGHT :: 100
 PIXEL_COUNT :: WIDTH * HEIGHT
 
 FILE_BUFFER : [HEIGHT*WIDTH]Color
 
-SAMPLES_COUNT := 1000
-MAX_DEPTH_RAYCASTING :: 100
+SAMPLES_COUNT := 100
+MAX_DEPTH_RAYCASTING :: 50
 
 // Camera
 aspect_ratio := f64(WIDTH)/f64(HEIGHT)
 viewport_height := 2.0
 viewport_width := viewport_height * aspect_ratio
 
+CAMERA_POS := ZERO + (FORWARD * -10)
 origin := CAMERA_POS
 horizontal : Vec3 = RIGHT * viewport_width
 vertical : Vec3 = UP * viewport_height
 lower_left_corner : Vec3 = origin - (horizontal/2) - (vertical/2) + FORWARD
 
+// Random generation of spheres
+spheres :[dynamic]Sphere;
+
+RANDOM_SPHERES_COUNT :: 7
+
+MIN_DIST : f64 = -2
+MAX_DIST : f64 = 2
+
+MIN_RADIUS : f64 = .1
+MAX_RADIUS : f64 = 4
+
 // Config ppm
 FILEPATH := "./out.ppm"
+
+// Random generation
+rng_0_1 :: proc() -> f64 {
+    return rand.float64_range(0,1)
+}
+
+random_color :: proc() -> Color {
+    return { rng_0_1(), rng_0_1(), rng_0_1() }
+}
+
+random_material :: proc() -> Material {
+	material_type := rand.choice_enum(MaterialType)
+    mat_ptr := GenRandomMaterialTable[material_type]();
+    return {
+        type = material_type,
+        data = mat_ptr
+    }
+}
+
+random_lambertian :: proc() -> rawptr {
+    lamb := new(LambertianData)
+    lamb.albedo = random_color()
+    return rawptr(lamb)
+}
+
+random_metalic :: proc() -> rawptr {
+    met := new(MetalicData)
+    met.albedo = random_color()
+    met.fuzziness = rand.float64()
+    return rawptr(met)
+}
+
+random_dielectric :: proc() -> rawptr {
+    diel := new(DieletricData)
+    diel.reflectiviness = rand.float64_range(1, 3)
+    return rawptr(diel)
+}
+
+random_sphere :: proc() -> Sphere {
+    return {
+        pos = ZERO + rand_point_in_sphere_any() * rand.float64_range(MIN_DIST, MAX_DIST),
+        radius = rand.float64_range(MIN_RADIUS, MAX_RADIUS),
+        material = random_material()
+    }
+}
 
 // Material procedures
 schlick_aprox :: proc(cos, ref : f64) -> f64 {
@@ -425,6 +422,20 @@ main :: proc() {
     fmt.println("Image - [ Width: {} - Height: {} ]", WIDTH, HEIGHT)
     fmt.println("Ray - [ Ray max depth: {} ]", MAX_DEPTH_RAYCASTING)
     fmt.println("Multsampling - [ Sample count(per pixel): {} ]", SAMPLES_COUNT)
+
+    // Prepare for random generation
+    spheres = make([dynamic]Sphere)
+    defer {
+        for sphere in spheres {
+            free(sphere.material.data)
+        }
+        delete(spheres)
+    }
+
+    for i in 0..<RANDOM_SPHERES_COUNT {
+        append(&spheres, random_sphere())
+    }
+
 
     fmt.println(" --- Create threads.")
     THREAD_COUNT :: 16
