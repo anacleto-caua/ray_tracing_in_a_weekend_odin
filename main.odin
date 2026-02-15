@@ -1,6 +1,5 @@
 package main
 
-import "core:sys/wasm/wasi"
 import "core:os"
 import "core:fmt"
 import "core:math"
@@ -93,47 +92,44 @@ color_blue : Color = { 0, 0, 1 }
 color_white : Color = { 1, 1, 1 }
 color_magenta : Color = { 1, 0, 1 }
 
-color_top : Color = { 1, 1, 1 }
-color_bottom : Color = { 0, 0, 1 }
-SURFACE_REFLECTION : f64 = .4
-
 // T Cap
 T_MIN :: 0.001
 T_MAX :: math.F64_MAX
 
 // Image quality
-//WIDTH :: 2560
-//HEIGHT :: 1440
-WIDTH :: 200
-HEIGHT :: 100
-PIXEL_COUNT :: WIDTH * HEIGHT
-
-FILE_BUFFER : [HEIGHT*WIDTH]Color
+WIDTH :: 2560
+HEIGHT :: 1440
+//WIDTH :: 400
+//HEIGHT :: 200
 
 SAMPLES_COUNT := 100
 MAX_DEPTH_RAYCASTING :: 50
+RANDOM_SPHERES_COUNT :: 100
 
 // Camera
-aspect_ratio := f64(WIDTH)/f64(HEIGHT)
-viewport_height := 2.0
-viewport_width := viewport_height * aspect_ratio
+CameraInfo :: struct {
+    aspect_ratio : f64,
+    viewport_height : f64,
+    viewport_width : f64,
+    origin : Pos3,
+    horizontal : Vec3,
+    vertical : Vec3,
+    top_left_corner : Vec3
+}
 
-CAMERA_POS := ZERO + (FORWARD * -10)
-origin := CAMERA_POS
-horizontal : Vec3 = RIGHT * viewport_width
-vertical : Vec3 = UP * viewport_height
-lower_left_corner : Vec3 = origin - (horizontal/2) - (vertical/2) + FORWARD
+camera : CameraInfo
 
 // Random generation of spheres
 spheres :[dynamic]Sphere;
 
-RANDOM_SPHERES_COUNT :: 7
+PIXEL_COUNT :: WIDTH * HEIGHT
+FILE_BUFFER : [PIXEL_COUNT]Color
 
 MIN_DIST : f64 = -2
 MAX_DIST : f64 = 2
 
 MIN_RADIUS : f64 = .1
-MAX_RADIUS : f64 = 4
+MAX_RADIUS : f64 = .2
 
 // Config ppm
 FILEPATH := "./out.ppm"
@@ -141,6 +137,13 @@ FILEPATH := "./out.ppm"
 // Random generation
 rng_0_1 :: proc() -> f64 {
     return rand.float64_range(0,1)
+}
+
+rng_pos1_neg1 :: proc() -> i32 {
+    if rand.int31() % 2 == 0 {
+        return 1
+    }
+    return -1
 }
 
 random_color :: proc() -> Color {
@@ -373,7 +376,8 @@ cast_rays_per_thread :: proc(t: ^thread.Thread) {
                 u : f64 = ((f64(x) + rand.float64()) /f64(WIDTH - 1))
                 v : f64 = 1 - ((f64(local_y) + rand.float64()) /f64(HEIGHT - 1))
 
-                eye_ray : Ray = { origin, linalg.normalize(lower_left_corner + u*horizontal + v*vertical) }
+                target_pixel := camera.top_left_corner + u*camera.horizontal + v*camera.vertical
+                eye_ray : Ray = { camera.origin, linalg.normalize(target_pixel - camera.origin) }
                 sample_color := color(eye_ray, 0)
 
                 final_color += sample_color
@@ -415,14 +419,34 @@ ppm_to_png :: proc(ppm_filepath, png_filepath : string) {
     }
 }
 
+write_camera_data :: proc(look_from, look_at : Pos3, vertical_fov_deg : f64) {
+    camera.origin = look_from
+    camera.aspect_ratio = f64(WIDTH)/f64(HEIGHT)
+
+    theta := vertical_fov_deg*math.PI/180
+    half_height := math.tan(theta/2)
+    half_width := camera.aspect_ratio * half_height
+
+    w := linalg.normalize(look_from - look_at)
+    u := linalg.normalize(linalg.cross(UP, w))
+    v := linalg.cross(w, u)
+
+    camera.top_left_corner = camera.origin - (half_width*u) + (half_height*v) - w
+    camera.horizontal = 2 * half_width * u
+    camera.vertical = -2 * half_height * v
+}
+
 // Entry point
 main :: proc() {
-    fmt.println(" --- Begining process!")
-    fmt.println("Quality params:")
-    fmt.println("Image - [ Width: {} - Height: {} ]", WIDTH, HEIGHT)
-    fmt.println("Ray - [ Ray max depth: {} ]", MAX_DEPTH_RAYCASTING)
-    fmt.println("Multsampling - [ Sample count(per pixel): {} ]", SAMPLES_COUNT)
+    fmt.printfln(" --- Begining process!")
+    fmt.printfln("Quality params:")
+    fmt.printfln("Image - [ Width: {} - Height: {} ]", WIDTH, HEIGHT)
+    fmt.printfln("Ray - [ Ray max depth: {} ]", MAX_DEPTH_RAYCASTING)
+    fmt.printfln("Multsampling - [ Sample count(per pixel): {} ]", SAMPLES_COUNT)
 
+    write_camera_data((ZERO) + (FORWARD * -2) + (UP * -2), FORWARD, 90)
+
+    fmt.println(" --- Generating random spheres.")
     // Prepare for random generation
     spheres = make([dynamic]Sphere)
     defer {
@@ -432,13 +456,42 @@ main :: proc() {
         delete(spheres)
     }
 
-    for i in 0..<RANDOM_SPHERES_COUNT {
-        append(&spheres, random_sphere())
+    // Create a sphere to provide the image base
+    BASE_SIZE : f64 = 1000
+    base_data := new(LambertianData)
+    base_data.albedo = { .3, 0, .3 }
+    base_sphere : Sphere = {
+        pos = { 0, -BASE_SIZE, 0 },
+        radius = BASE_SIZE,
+        material = {
+            type = MaterialType.Lambertian,
+            data = rawptr(base_data)
+        }
+    }
+    append(&spheres, base_sphere)
+
+    // Fill in the other spheres
+    FILL_SPHERE_ROOT := ZERO + (FORWARD * -1)
+    idx := 1
+    sqrt_spheres_count := math.sqrt(f64(RANDOM_SPHERES_COUNT))
+    spheres_count_rest := RANDOM_SPHERES_COUNT - sqrt_spheres_count
+    for i in 0..<sqrt_spheres_count {
+        for j in 0..<spheres_count_rest {
+            append(&spheres, random_sphere())
+            rng_1 := rng_0_1()
+            rng_2 := 1.0 - rng_1
+            radius := spheres[idx].radius
+            rng_pos : Pos3 = FILL_SPHERE_ROOT +
+                (UP * radius) + (RIGHT * (j * rng_1 * f64(rng_pos1_neg1()))) + (FORWARD * (i * rng_2 * f64(rng_pos1_neg1())))
+                //(FORWARD * spheres[i].radius * rng_1 * f64(i) * f64(rng_pos1_neg1())) +
+                //(RIGHT * spheres[i].radius * rng_2 * f64(i) * f64(rng_pos1_neg1()))
+            spheres[idx].pos = rng_pos
+            idx+=1
+        }
     }
 
-
     fmt.println(" --- Create threads.")
-    THREAD_COUNT :: 16
+    THREAD_COUNT :: 12
     threads_data : [THREAD_COUNT]ThreadData
     // Break down tasks
     task_size : u64 = HEIGHT / THREAD_COUNT
